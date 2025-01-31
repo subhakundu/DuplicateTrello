@@ -1,12 +1,22 @@
 // server.js
 const express = require("express");
 const cors = require("cors");
+const { Kafka } = require('kafkajs');
 
 const app = express();
 const PORT = 9080;
 
 app.use(cors());
 app.use(express.json());
+
+const kafka = new Kafka({ clientId: 'express-server', brokers: ['localhost:9092'] });
+const producer = kafka.producer();
+
+const initKafka = async () => {
+  await producer.connect();
+};
+
+initKafka();
 
 let boards = [
   {
@@ -54,6 +64,8 @@ app.post("/api/tasks", (req, res) => {
 
 // Update task position
 app.post("/api/move-task", (req, res) => {
+
+  console.log(boards);
   const { taskId, sourceBoardId, targetBoardId } = req.body;
 
   const sourceBoard = boards.find((b) => b.id === sourceBoardId);
@@ -64,7 +76,19 @@ app.post("/api/move-task", (req, res) => {
     if (taskIndex > -1) {
       const [task] = sourceBoard.tasks.splice(taskIndex, 1);
       targetBoard.tasks.push(task);
-      res.status(200).json({ message: "Task moved successfully" });
+
+      try {
+      producer.send({
+          topic: 'actions-topic',
+          messages: [{ key: "new-data", value: JSON.stringify(boards) }],
+        });
+        res.status(200).send('Action sent to Kafka');
+      } catch (error) {
+        console.error('Error sending action to Kafka', error);
+        res.status(500).send('Failed to send action');
+      }
+
+      //res.status(200).json({ message: "Task moved successfully" });
     } else {
       res.status(404).json({ message: "Task not found in source board" });
     }
